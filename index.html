@@ -1,1 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Illinois Weather Ticker</title>
+
+  <style>
+    :root {
+      --bg: #0b2545;
+      --fg: #ffffff;
+      --h: 40px;
+      --speed: 75s;
+      --font: 15px;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    .wrap {
+      height: var(--h);
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .ticker {
+      white-space: nowrap;
+      display: inline-block;
+      padding-left: 100%;
+      animation: scroll var(--speed) linear infinite;
+      font-size: var(--font);
+    }
+
+    @keyframes scroll {
+      from { transform: translateX(0); }
+      to   { transform: translateX(-100%); }
+    }
+
+    .wrap:hover .ticker {
+      animation-play-state: paused;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div id="ticker" class="ticker">
+      Loading Illinois weather alerts…
+    </div>
+  </div>
+
+  <script>
+    const rssUrl = "https://alerts.weather.gov/cap/il.php?x=0";
+    const proxy = "https://api.allorigins.win/raw?url=";
+
+    function clean(txt) {
+      return (txt || "").replace(/\s+/g, " ").trim();
+    }
+
+    fetch(proxy + encodeURIComponent(rssUrl))
+      .then(r => r.text())
+      .then(xml => new DOMParser().parseFromString(xml, "text/xml"))
+      .then(doc => {
+        const entries = [...doc.querySelectorAll("entry")];
+
+        if (!entries.length) {
+          document.getElementById("ticker").textContent =
+            "No active Illinois weather alerts at this time.";
+          return;
+        }
+
+        const alerts = entries.slice(0, 8).map(e =>
+          clean(e.querySelector("title")?.textContent)
+        );
+
+        document.getElementById("ticker").textContent =
+          alerts.join("  |  ");
+      })
+      .catch(() => {
+        document.getElementById("ticker").textContent =
+          "Weather service temporarily unavailable.";
+      });
+  </script>
+</body>
+</html>
 
