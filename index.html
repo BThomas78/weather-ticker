@@ -57,37 +57,51 @@
   </div>
 
   <script>
-    const rssUrl = "https://alerts.weather.gov/cap/il.php?x=0";
-    const proxy = "https://api.allorigins.win/raw?url=";
+  // Official NWS Alerts API (Illinois)
+  const url = "https://api.weather.gov/alerts/active?area=IL";
 
-    function clean(txt) {
-      return (txt || "").replace(/\s+/g, " ").trim();
+  function clean(txt) {
+    return (txt || "").replace(/\s+/g, " ").trim();
+  }
+
+  fetch(url, {
+    headers: {
+      // NWS asks for a user agent; this helps reliability
+      "User-Agent": "BThomas78 weather-ticker (GitHub Pages)",
+      "Accept": "application/geo+json"
     }
+  })
+    .then(r => {
+      if (!r.ok) throw new Error("NWS request failed: " + r.status);
+      return r.json();
+    })
+    .then(data => {
+      const features = data.features || [];
 
-    fetch(proxy + encodeURIComponent(rssUrl))
-      .then(r => r.text())
-      .then(xml => new DOMParser().parseFromString(xml, "text/xml"))
-      .then(doc => {
-        const entries = [...doc.querySelectorAll("entry")];
-
-        if (!entries.length) {
-          document.getElementById("ticker").textContent =
-            "No active Illinois weather alerts at this time.";
-          return;
-        }
-
-        const alerts = entries.slice(0, 8).map(e =>
-          clean(e.querySelector("title")?.textContent)
-        );
-
+      if (!features.length) {
         document.getElementById("ticker").textContent =
-          alerts.join("  |  ");
-      })
-      .catch(() => {
-        document.getElementById("ticker").textContent =
-          "Weather service temporarily unavailable.";
+          "No active Illinois weather alerts at this time.";
+        return;
+      }
+
+      // Grab top N alert headlines
+      const N = 8;
+      const headlines = features.slice(0, N).map(f => {
+        const p = f.properties || {};
+        // headline is often best; fallback to event
+        return clean(p.headline || p.event || "Weather Alert");
       });
-  </script>
+
+      document.getElementById("ticker").textContent =
+        headlines.join("  |  ");
+    })
+    .catch(err => {
+      console.error(err);
+      document.getElementById("ticker").textContent =
+        "Weather service temporarily unavailable.";
+    });
+</script>
+
 </body>
 </html>
 
