@@ -106,4 +106,189 @@
     // NEW: speed tuning via URL:
     //   ?pps=45  (slower)
     //   ?pps=55  (normal)
-    //   ?pps
+    //   ?pps=70  (faster)
+    function getPxPerSecond(){
+      const params = new URLSearchParams(window.location.search);
+      const v = Number(params.get("pps"));
+      if (!isFinite(v) || v <= 0) return 55; // default readable
+      return Math.min(120, Math.max(25, v)); // clamp
+    }
+
+    // NEW: compute animation duration from distance so it feels consistent
+    function setTickerSpeedByPixelsPerSecond(pxPerSecond = 55) {
+      const marquee = document.getElementById("marquee");
+      const ticker = document.getElementById("ticker");
+      if (!marquee || !ticker) return;
+
+      // Total distance = text width + visible width
+      const distance = ticker.scrollWidth + marquee.clientWidth;
+
+      // Duration (seconds) = distance / pxPerSecond
+      const seconds = Math.max(40, Math.min(240, distance / pxPerSecond));
+
+      document.documentElement.style.setProperty("--speed", Math.round(seconds) + "s");
+    }
+
+    // County filter via URL (optional):
+    //   ?counties=Cook,DuPage
+    //   ?counties=Champaign
+    function getCountyFilterList(){
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get("counties");
+      if (!raw) return [];
+      return raw.split(",").map(s => s.trim()).filter(Boolean);
+    }
+
+    function clean(txt){
+      return (txt || "").replace(/\s+/g, " ").trim();
+    }
+
+    function isWinterSeason(){
+      const m = new Date().getMonth() + 1; // 1-12
+      return (m === 11 || m === 12 || m === 1 || m === 2 || m === 3);
+    }
+
+    function iconFor(eventOrHeadline){
+      const t = (eventOrHeadline || "").toLowerCase();
+
+      if (t.includes("tornado")) return "🌀";
+      if (t.includes("severe thunderstorm")) return "⛈️";
+      if (t.includes("thunderstorm")) return "⛈️";
+      if (t.includes("flash flood")) return "🌊";
+      if (t.includes("flood")) return "🌊";
+      if (t.includes("high wind") || t.includes("wind advisory") || t.includes("wind")) return "🌬️";
+      if (t.includes("blizzard")) return "❄️";
+      if (t.includes("winter storm")) return "❄️";
+      if (t.includes("winter weather")) return "❄️";
+      if (t.includes("snow")) return "❄️";
+      if (t.includes("ice") || t.includes("freezing rain") || t.includes("sleet")) return "🧊";
+      if (t.includes("wind chill")) return "🥶";
+      if (t.includes("extreme cold")) return "🥶";
+      if (t.includes("heat")) return "🌡️";
+      if (t.includes("dense fog") || t.includes("fog")) return "🌫️";
+
+      return "⚠️";
+    }
+
+    // Determine label state based on the most severe active product found
+    // Priority: WARNING > WATCH > ADVISORY/STATEMENT > OTHER
+    function classifySeverity(features){
+      const text = features.map(f => {
+        const p = f.properties || {};
+        return (p.headline || p.event || "").toLowerCase();
+      }).join(" | ");
+
+      if (text.includes(" warning")) return "warning";
+      if (text.includes(" watch")) return "watch";
+      if (text.includes(" advisory") || text.includes(" statement")) return "advisory";
+      return "other";
+    }
+
+    function applyLabelStyle(severity){
+      const label = document.getElementById("label");
+      label.classList.remove("flash");
+
+      const winter = isWinterSeason();
+
+      if (severity === "warning"){
+        label.textContent = "WEATHER WARNING:";
+        label.classList.add("flash");
+        document.documentElement.style.setProperty("--label-bg", "linear-gradient(90deg, #7f1d1d, #111827)");
+        document.documentElement.style.setProperty("--label-accent", "#fca5a5");
+        return;
+      }
+
+      if (severity === "watch"){
+        label.textContent = "WEATHER WATCH:";
+        document.documentElement.style.setProperty("--label-bg", "linear-gradient(90deg, #a16207, #111827)");
+        document.documentElement.style.setProperty("--label-accent", "#fde68a");
+        return;
+      }
+
+      if (winter){
+        label.textContent = "WINTER OPS:";
+        document.documentElement.style.setProperty("--label-bg", "linear-gradient(90deg, #1e3a8a, #0f172a)");
+        document.documentElement.style.setProperty("--label-accent", "#93c5fd");
+      } else {
+        label.textContent = "WEATHER ADVISORY:";
+        document.documentElement.style.setProperty("--label-bg", "linear-gradient(90deg, #0b4a6f, #111827)");
+        document.documentElement.style.setProperty("--label-accent", "#67e8f9");
+      }
+    }
+
+    function matchesCountyFilter(areaDesc, counties){
+      if (!counties.length) return true;
+      const a = (areaDesc || "").toLowerCase();
+      return counties.some(c => a.includes(c.toLowerCase()));
+    }
+
+    function formatItem(p){
+      const headline = clean(p.headline || p.event || "Weather Alert");
+      const area = clean(p.areaDesc || "");
+      const icon = iconFor(headline);
+      return area ? `${icon} ${headline} — ${area}` : `${icon} ${headline}`;
+    }
+
+    async function loadAlerts(){
+      const ticker = document.getElementById("ticker");
+      const counties = getCountyFilterList();
+      const pxPerSecond = getPxPerSecond();
+
+      try {
+        const r = await fetch(NWS_URL, {
+          headers: {
+            "User-Agent": "BThomas78 weather-ticker (GitHub Pages)",
+            "Accept": "application/geo+json"
+          }
+        });
+
+        if (!r.ok) throw new Error("NWS request failed: " + r.status);
+        const data = await r.json();
+
+        let features = (data.features || []).map(f => f || {}).filter(Boolean);
+
+        if (counties.length){
+          features = features.filter(f => matchesCountyFilter((f.properties||{}).areaDesc, counties));
+        }
+
+        applyLabelStyle(classifySeverity(features));
+
+        if (!features.length){
+          const msg = counties.length
+            ? `No active Illinois weather alerts for: ${counties.join(", ")}.`
+            : "No active Illinois weather alerts at this time.";
+          ticker.textContent = msg;
+
+          // NEW: apply consistent speed even for short/no-alert message
+          requestAnimationFrame(() => setTickerSpeedByPixelsPerSecond(pxPerSecond));
+          return;
+        }
+
+        const items = features
+          .slice(0, MAX_ITEMS)
+          .map(f => formatItem(f.properties || {}));
+
+        ticker.textContent = items.join("  |  ");
+
+        // NEW: after DOM updates, compute scrollWidth and set speed consistently
+        requestAnimationFrame(() => setTickerSpeedByPixelsPerSecond(pxPerSecond));
+      } catch (err){
+        console.error(err);
+        applyLabelStyle("other");
+        ticker.textContent = "Weather service temporarily unavailable.";
+
+        // NEW: still set a reasonable speed so it doesn't whip by
+        requestAnimationFrame(() => setTickerSpeedByPixelsPerSecond(getPxPerSecond()));
+      }
+    }
+
+    loadAlerts();
+    setInterval(loadAlerts, REFRESH_MS);
+
+    // NEW: if the iframe/container resizes, recompute speed
+    window.addEventListener("resize", () => {
+      setTickerSpeedByPixelsPerSecond(getPxPerSecond());
+    });
+  </script>
+</body>
+</html>
